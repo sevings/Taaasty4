@@ -1,10 +1,13 @@
 import QtQuick 1.1
+
 import './TastyAPI.js' as API
 import "./Controller.js" as Ctrl
+import "./Stemmer.js" as Stemmer
+import "./Bayes.js" as Bayes
 
 Item {
     id: window
-    width: 480
+    width: 600
     height: 800
     property color backgroundColor: 'black'
     property color textColor: 'white'
@@ -22,8 +25,16 @@ Item {
     property int busy: 0
     Component.onCompleted: {
         Ctrl.init();
-        //API.authorize('login@email', 'password');
+//        API.authorize('binque@ya.ru', '296010tasty');
         Ctrl.loadNewEntries();
+//        var words = [];
+//        var text = 'наиважнейший <a href="http://ya.ru/bb/kk.html"> < img src = \'http://ya.ru/img.jpeg\' >'
+//        Bayes.addText(text, words);
+//        for (var i in words)
+//            console.log(words[i], i);
+    }
+    Component.onDestruction: {
+        Bayes.store();
     }
 
     onBusyChanged: {
@@ -61,7 +72,6 @@ Item {
         repeat: true
         onTriggered: Ctrl.loadLatestMessages()
     }
-
 
     Rectangle {
         id: bar
@@ -206,6 +216,15 @@ Item {
                 }
             }
             Button {
+                id: bayesButton
+                label: 'Классификатор'
+                visible: header.showMainMenu && window.secondMode === 'none' && !window.showConvers && Ctrl.bayesEnabled
+                onClicked: {
+                    header.showMainMenu = false;
+                    Bayes.showFire();
+                }
+            }
+            Button {
                 id: exitButton
                 label: 'Выход'
                 visible: header.showMainMenu && window.secondMode === 'none' && !window.showConvers
@@ -233,6 +252,30 @@ Item {
                                && window.mode !== 'anonymous')) && header.showProfileMenu && !window.showConvers
                 onClicked: Ctrl.showProfile()
             }
+            Button {
+                id: fireTlogButton
+                label: 'Интересный тлог'
+                visible:  (window.mode === 'my' || window.mode === 'tlog'
+                           || ((window.secondMode === 'fullEntry'  || window.secondMode === 'profile')
+                               && window.mode !== 'anonymous')) && header.showProfileMenu && !window.showConvers
+                          && !Bayes.isTlogAdded(Ctrl.authorId, true) && Ctrl.bayesEnabled
+                onClicked:  {
+                    header.showProfileMenu = false;
+                    Bayes.voteForTlog(Ctrl.authorId);
+                }
+            }
+            Button {
+                id: waterTlogButton
+                label: 'Неинтересный тлог'
+                visible:  (window.mode === 'my' || window.mode === 'tlog'
+                           || ((window.secondMode === 'fullEntry'  || window.secondMode === 'profile')
+                               && window.mode !== 'anonymous')) && header.showProfileMenu && !window.showConvers
+                          && !Bayes.isTlogAdded(Ctrl.authorId, true) && Ctrl.bayesEnabled
+                onClicked:  {
+                    header.showProfileMenu = false;
+                    Bayes.voteForTlog(Ctrl.authorId, true);
+                }
+            }
 
             Button {
                 id: readTlogButton
@@ -253,6 +296,37 @@ Item {
                 label: 'Отправить'
                 visible: header.showMainMenu && window.secondMode === 'textEntry' && !window.showConvers
                 onClicked: Ctrl.addPost()
+            }
+
+            Button {
+                id: bayesFireButton
+                label: 'Интересные'
+                visible: header.showMainMenu && window.secondMode === 'bayes' && !window.showConvers
+                         && Ctrl.bayesEnabled
+                onClicked: {
+                    header.showMainMenu = false;
+                    Bayes.showFire();
+                }
+            }
+            Button {
+                id: bayesWaterButton
+                label: 'Неинтересные'
+                visible: header.showMainMenu && window.secondMode === 'bayes' && !window.showConvers
+                         && Ctrl.bayesEnabled
+                onClicked: {
+                    header.showMainMenu = false;
+                    Bayes.showWater();
+                }
+            }
+            Button {
+                id: bayesTrainButton
+                label: 'Тренировать'
+                visible: header.showMainMenu && window.secondMode === 'bayes' && !window.showConvers
+                         && Ctrl.bayesEnabled
+                onClicked: {
+                    header.showMainMenu = false;
+                    Bayes.train();
+                }
             }
 
             Button {
@@ -308,6 +382,10 @@ Item {
                 color: window.backgroundColor
                 property color fontColor: window.textColor
                 height: 50 + content.height + entryTitle.height + images.height + entryAvatar.height + comments.height
+                property int bayes_rating: bayes
+                Behavior on bayes_rating {
+                    NumberAnimation { duration: 300 }
+                }
                 MouseArea {
                     anchors.fill: parent
                     onClicked: {
@@ -323,6 +401,7 @@ Item {
                     source: !symbol ? author.userpic.thumb64_url : ''
                     name: author.name
                     symbol: !author.userpic.hasOwnProperty('thumb64_url')
+                    onClicked: Ctrl.showProfile(author.id)
                 }
                 Text {
                     id: nick
@@ -352,21 +431,49 @@ Item {
                     entryVoteButton.enabled = can_vote && !newRating.is_voted;
                 }
                 Button {
+                    id: entryBayesButton
+                    label: enabled ? '—' : ''
+                    fontSize: 14
+                    enabled: bayes_votable && Ctrl.bayesEnabled
+                    anchors.bottom: entryVoteButton.bottom
+                    anchors.left: undefined
+                    anchors.right: entryBayesText.left
+                    anchors.bottomMargin: 0
+                    height: entryVoteButton.height * 2 / 3
+                    width: entryVoteButton.width * 2 / 3
+                    onClicked: {
+                        var ix =  parent.x + mouseX;
+                        var iy =  parent.y + mouseY;
+                        thisTlog.currentIndex = thisTlog.indexAt(ix, iy);
+                        Ctrl.voteForEntry(true);
+                    }
+                }
+                Text {
+                    id : entryBayesText
+                    visible: Ctrl.bayesEnabled
+                    text: entry.bayes_rating
+                    font.pointSize: 14
+                    color: window.textColor
+                    anchors.verticalCenter: entryBayesButton.verticalCenter
+                    anchors.right: entryVoteButton.left
+                    //anchors.left: entryBayesButton.right
+                    anchors.margins: 10
+                }
+                Button {
                     id: entryVoteButton
                     anchors.top: parent.top
                     anchors.left: undefined
                     height: 64
                     width: parent.width / 5
-                    label: '+ ' + rating.votes
-                    visible: is_voteable
-                    enabled: can_vote && !rating.is_voted
+                    label: is_voteable ? '+ ' + rating.votes : '+'
+                    visible: is_voteable || (bayes_votable && Ctrl.bayesEnabled)
+                    enabled: (bayes_votable && Ctrl.bayesEnabled) || (can_vote && !rating.is_voted)
                     fontSize: 20
                     onClicked: {
                         var ix =  parent.x + mouseX;
                         var iy =  parent.y + mouseY;
-                        //console.log('x: ' + ix + ', y: ' + iy);
                         thisTlog.currentIndex = thisTlog.indexAt(ix, iy);
-                        Ctrl.voteForEntry(thisTlog.model.get(thisTlog.currentIndex).id, rating.is_voted);
+                        Ctrl.voteForEntry(false);
                     }
                 }
 
@@ -422,25 +529,25 @@ Item {
                      && window.secondMode === 'none' && !window.showNotifs && !window.showConvers
             model: ListModel {}
             spacing: 50
-	    property int total
+            property int total
             onNearEnd:  Ctrl.loadFlows();
             onAboveBegin: Ctrl.reloadFlows();
-	    header: Item {
-		    anchors.left: parent.left
-		    anchors.right: parent.right
-		    height: flowsCountText.paintedHeight + 80
-		    Text {
-			id: flowsCountText
-		        anchors.left: parent.left
-		        anchors.right: parent.right
-			anchors.verticalCenter: parent.verticalCenter
-		        font.pointSize: 25
-		        wrapMode: Text.Wrap
-		        horizontalAlignment: Text.AlignHCenter
-		        color: window.textColor
-		        text: Ctrl.numStr(flowsList.total, ' поток', ' потока', ' потоков')
-		    }
-	    }
+            header: Item {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: flowsCountText.paintedHeight + 80
+                Text {
+                id: flowsCountText
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                    font.pointSize: 25
+                    wrapMode: Text.Wrap
+                    horizontalAlignment: Text.AlignHCenter
+                    color: window.textColor
+                    text: Ctrl.numStr(flowsList.total, ' поток', ' потока', ' потоков')
+                }
+            }
             delegate: Rectangle {
                 //id: flow
                 anchors.left: parent.left
@@ -517,6 +624,7 @@ Item {
             property bool voted
             property int votes
             property bool voteable
+            property bool bayes_votable
             property bool canVote
             property bool canWatch
             property bool canFavorite
@@ -543,6 +651,7 @@ Item {
                     source: !symbol ? user.userpic.thumb64_url : ''
                     name: user.name
                     symbol: !user.userpic.hasOwnProperty('thumb64_url')
+                    onClicked: Ctrl.showProfile(user.id)
                 }
                 Text {
                     id: nameText
@@ -581,13 +690,13 @@ Item {
                     font.pointSize: 17
                     textFormat: Text.RichText
                 }
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: {
-                        fullEntry.commentAuthor = user.name;
-                        //window.showCommentMenu = true;
-                    }
-                }
+//                MouseArea {
+//                    anchors.fill: parent
+//                    onClicked: {
+//                        fullEntry.commentAuthor = user.name;
+//                        //window.showCommentMenu = true;
+//                    }
+//                }
             }
             header: Item {
                 id: fullEntryContent
@@ -679,12 +788,12 @@ Item {
                     anchors.left: fullEntryWatchButton.right
                     anchors.margins: 10
                     anchors.topMargin: 20
-                    label: '+ ' + fullEntry.votes
+                    label: fullEntry.voteable ? '+ ' + fullEntry.votes : '+'
                     height: 64
                     fontSize: fullEntryFavButton.fontSize
-                    visible: fullEntry.voteable
-                    enabled: fullEntry.canVote && !fullEntry.voted // not working on the site?
-                    onClicked: Ctrl.voteForEntry(fullEntry.entryId, fullEntry.voted)
+                    visible: (fullEntry.bayes_votable && Ctrl.bayesEnabled) || fullEntry.voteable
+                    enabled: (fullEntry.bayes_votable && Ctrl.bayesEnabled) || (fullEntry.canVote && !fullEntry.voted) // not working on the site?
+                    onClicked: Ctrl.voteForEntry(fullEntry.voted)
                 }
             }
             footer: MessageEditor {
@@ -777,6 +886,7 @@ Item {
                     source: !symbol ? sender.userpic.thumb64_url : ''
                     name: sender.name
                     symbol: !sender.userpic.hasOwnProperty('thumb64_url')
+                    onClicked: Ctrl.showProfile(sender.id);
                 }
                 Text {
                     id: notifName
@@ -817,6 +927,7 @@ Item {
         MyListView {
             id: profile
             visible: window.secondMode === 'profile' && !window.showNotifs && !window.showConvers
+            property int tlogId: 0
             property string avatarUrl
             property string name
             property string followers
@@ -896,7 +1007,7 @@ Item {
 
         MyListView {
             id: users
-            visible: window.secondMode === 'users' && !window.showNotifs && !window.showConvers
+            visible: (window.secondMode === 'users' || window.secondMode === 'bayes') && !window.showNotifs && !window.showConvers
             property string title: 'Подписки'
             property string type: 'followings'
             onTypeChanged: {
@@ -904,6 +1015,10 @@ Item {
                     title = 'Подписчики';
                 else if (type === 'followings')
                     title = 'Подписки';
+                else if (type === 'fire')
+                    title = 'Интересные тлоги';
+                else if (type === 'water')
+                    title = 'Неинтересные тлоги';
             }
             model: ListModel {
                 id: usersModel
@@ -919,6 +1034,7 @@ Item {
                 anchors.right: parent.right
                 height: usersAvatar.height + 20
                 color: usersMouse.pressed ? window.brightColor : window.backgroundColor
+                //property int userid: user.id
                 SmallAvatar {
                     id: usersAvatar
                     anchors.top: undefined
@@ -927,22 +1043,32 @@ Item {
                     source: !symbol ? userpic.thumb64_url : ''
                     name: name
                     symbol: !userpic.hasOwnProperty('thumb64_url')
-                }
-                Text {
-                    font.pointSize: 25
-                    color: window.textColor
-                    text: name
-                    anchors.left: usersAvatar.right
-                    anchors.right: parent.right
-                    anchors.verticalCenter: usersAvatar.verticalCenter
-                    anchors.leftMargin: 10
-                    anchors.rightMargin: 10
-                    elide: Text.ElideRight
+                    onClicked: Ctrl.showProfile(id)
                 }
                 MouseArea {
                     id: usersMouse
-                    anchors.fill: parent
-                    onClicked: Ctrl.showTlogById(id);
+//                    anchors.fill: parent
+                    anchors.left: usersAvatar.right
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    onClicked: {
+                        if (window.secondMode === 'bayes')
+                            Bayes.toggleInclude(users.type, id);
+                        else
+                            Ctrl.showTlogById(id);
+                    }
+                    Text {
+                        id: usersName
+                        font.pointSize: 25
+                        color: (window.secondMode === 'bayes' && !bayes_include) ? '#808080' : window.textColor
+                        text: name
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        elide: Text.ElideRight
+                    }
                 }
             }
             header: Item {
@@ -959,9 +1085,43 @@ Item {
                 }
             }
             footer: Item {
-                height: 20
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: usersAdd.visible ? usersAdd.height : 0
+                MessageEditor {
+                    id: usersAdd
+                    visible: window.secondMode === 'bayes'
+                    onSent: Bayes.addTlog(users.type, usersAdd.message.trim());
+                }
             }
         }
+
+        Item {
+            id: bayesLoad
+            visible: window.secondMode === 'bayesLoad'
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: tlogBar.height + allBar.height + 30
+            property bool fullLoad: true
+            ProgressBar {
+                id: tlogBar
+                anchors.top: parent.top
+                text: 'tlog'
+                value: 0
+                max: 0
+            }
+            ProgressBar {
+                id: allBar
+                visible: bayesLoad.fullLoad
+                anchors.top: tlogBar.bottom
+                text: 'Всего'
+                value: 0
+                max: 0
+                percents: true
+            }
+        }
+
         Item {
             anchors.fill: parent
             visible: window.showConvers && !window.showNotifs
@@ -977,6 +1137,11 @@ Item {
                     anchors.right: parent.right
                     height: conversAvatar.height + 20
                     color: conversMouse.pressed ? window.brightColor : window.backgroundColor
+                    MouseArea {
+                        id: conversMouse
+                        anchors.fill: parent
+                        onClicked: Ctrl.showDialog(id, user_id, recipient.name);
+                    }
                     SmallAvatar {
                         id: conversAvatar
                         anchors.top: undefined
@@ -985,6 +1150,7 @@ Item {
                         source: !symbol ? recipient.userpic.thumb64_url : ''
                         name: recipient.name
                         symbol: !recipient.userpic.hasOwnProperty('thumb64_url')
+                        onClicked: Ctrl.showProfile(recipient.id);
                     }
                     Text {
                         id: conversName
@@ -1015,11 +1181,6 @@ Item {
                         anchors.margins: 20
                         color: window.brightColor
                         visible: unread_messages_count > 0
-                    }
-                    MouseArea {
-                        id: conversMouse
-                        anchors.fill: parent
-                        onClicked: Ctrl.showDialog(id, user_id, recipient.name);
                     }
                 }
             }

@@ -1,11 +1,17 @@
 //.pragma library
 
+var cashedImages = true;
+var bayesEnabled = true;
+var minEntryLength = 100;
+var bayesModes = ['live', 'anonymous', 'excellent', 'best', 'well', 'good'];
+
 var lastSecondMode = 'none';
 var authorId = 0;
-var cashedImages = true;
 
 function init() {
     API.onError = onError;
+    if (bayesEnabled)
+        Bayes.load();
 }
 
 function parseDate(str) {
@@ -137,10 +143,21 @@ function unwatched(entry) {
     window.busy--;
 }
 
-function voteForEntry(entry, unvote) {
-    window.busy++;
+function voteForEntry(unvote) {
     header.showMainMenu = false;
-    API.vote(updateRating, entry, unvote);
+    var entry = thisTlog.model.get(thisTlog.currentIndex);
+    if (!unvote && entry.can_vote && !entry.rating.is_voted) {
+        window.busy++;
+        API.vote(updateRating, entry.id, unvote);
+    }
+
+    var bayes = Bayes.voteForEntry(entry, unvote);
+    if (bayes !== undefined) {
+        thisTlog.model.setProperty(thisTlog.currentIndex, 'bayes', bayes);
+        thisTlog.model.setProperty(thisTlog.currentIndex, 'bayes_votable', false);
+    }
+    if (window.secondMode === 'fullEntry' && fullEntry.entryId === entry.id)
+        fullEntry.bayes_votable = false;
 }
 
 function updateRating(entry, rating) {
@@ -180,10 +197,13 @@ function copyUrl(url) {
     header.showMainMenu = false;
 }
 
-function showProfile() {
+function showProfile(slug) {
     window.busy++;
     header.showProfileMenu = false;
-    if (window.secondMode === 'profile') {
+    if (slug) {
+        API.getTlogInfo(fillProfile, slug);
+    }
+    else if (window.secondMode === 'profile') {
         closeSecondWindow();
     }
     else if (secondMode === 'fullEntry') {
@@ -238,6 +258,7 @@ function showTlog() {
 }
 function showTlogById(id) {
     authorId = id;
+    console.log(id);
     showTlog();
 }
 function showTlogBySlug() {
@@ -245,22 +266,28 @@ function showTlogBySlug() {
     if (slug.length === 0)
         return;
     window.showSlugInput = false;
-    slugInput.clear();
-    showTlogById(slug);
+    window.busy++;
+    API.getTlogInfo(function(tlog) {
+        window.busy--;
+        slugInput.clear();
+        fillHeader(tlog);
+        showTlogById(tlog.id);
+    }, slug);
 }
 
 function closeSecondWindow() {
     window.secondMode = lastSecondMode;
     lastSecondMode = 'none';
     header.showMainMenu = false;
-    if (window.secondMode === 'none' && thisTlog.model.count > thisTlog.currentIndex)
+    if ((window.secondMode === 'none' || window.secondMode === 'fullEntry')
+            && thisTlog.model.count > thisTlog.currentIndex)
         fillHeader(thisTlog.model.get(thisTlog.currentIndex).tlog);
 }
 
 function fillHeader(tlog) {
     if (((window.mode === 'my' || window.mode === 'tlog') && window.secondMode === 'none')
             || window.secondMode === 'profile' || window.secondMode === 'fullEntry') {
-        authorId = tlog.id;
+//        authorId = tlog.author.id;
         header.followed = tlog.my_relationship === 'friend';
         header.nick = tlog.author.name;
         header.avatarUrl = tlog.author.hasOwnProperty('userpic') && tlog.author.userpic.hasOwnProperty('thumb64_url')
@@ -269,7 +296,15 @@ function fillHeader(tlog) {
     else {
         header.avatarUrl = 'http://taaasty.com/favicons/favicon-64x64.png';
         //header.avatarUrl = 'http://taaasty.com/favicons/apple-touch-icon-120x120.png';
-        if (window.mode === 'friends')
+        if (window.secondMode === 'bayes') {
+            if (users.type === 'water')
+                header.nick = 'Неинтересные тлоги';
+            else if (users.type === 'fire')
+                header.nick = 'Интересные тлоги';
+        }
+        else if (window.secondMode === 'bayesLoad')
+            header.nick = 'Загрузка…';
+        else if (window.mode === 'friends')
             header.nick = 'Подписки';
         else if (window.mode === 'live')
             header.nick = 'Прямой эфир';
@@ -315,6 +350,15 @@ function reloadFlows() {
     loadFlows(true);
 }
 
+function hidingMode() {
+    if (!bayesEnabled)
+        return false;
+    for (var mode in bayesModes)
+        if (window.mode === bayesModes[mode])
+            return true;
+    return false;
+}
+
 function adaptEntry(e) {
     var h = 0;
     var attach = Qt.createQmlObject('import QtQuick 1.1; ListModel { }', window);
@@ -342,6 +386,8 @@ function adaptEntry(e) {
         var entry = e;
         entry.attach = attach;
         entry.wholeHeight = h;
+        entry.bayes = Bayes.classify(entry, hidingMode() ? minEntryLength : undefined);
+        entry.bayes_votable = !Bayes.isEntryAdded(entry.id);
         if (!entry.hasOwnProperty('text_truncated'))
             entry.text_truncated = (entry.type === 'text' || entry.type === 'anonymous' || entry.type === 'quote' || entry.type === 'image')
                     ? '' : '[' + entry.type + ']'
@@ -358,14 +404,24 @@ function fillTlog(tlog) {
     if (tlog !== undefined && tlog[0] !== undefined) {
         if (window.secondMode === 'none')
             fillHeader(tlog[0].tlog);
+        var found = 0;
         for (var e in tlog) {
-            thisTlog.model.append(adaptEntry(tlog[e]));
+            var entry = adaptEntry(tlog[e]);
+//            console.log(entry.bayes);
+            if (entry.bayes <= 0 && hidingMode())
+                continue;
+            thisTlog.model.append(entry);
+            found++;
         }
+        if (!found)
+            loadNewEntries();
+        console.log((tlog.length - found) + ' hidden');
     }
     window.busy--;
 }
 
 function showFullEntry(entry) {
+//    console.log(entry.id)
     if (entry.attach === undefined)
         entry = adaptEntry(entry);
     window.busy++;
@@ -379,6 +435,7 @@ function showFullEntry(entry) {
     fullEntry.voted = entry.rating.is_voted === true;
     fullEntry.votes = entry.rating.votes;
     fullEntry.voteable = entry.is_voteable === true;
+    fullEntry.bayes_votable = !Bayes.isEntryAdded(entry.id);
     fullEntry.canWatch = entry.can_watch === true;
     fullEntry.canVote = entry.can_vote === true;
     fullEntry.canFavorite = entry.can_favorite === true;
@@ -395,6 +452,8 @@ function showFullEntry(entry) {
     header.showMainMenu = false;
     window.secondMode = 'fullEntry';
     fillHeader(entry.tlog);
+
+    Bayes.classify(entry);
 
     fullEntry.model.clear();
     API.getComments(function (comments) {
@@ -442,9 +501,12 @@ function fillProfile(tlog) {
         profileModel.append({label: tlog.my_relationship === 'friend' ? 'Я слежу за тлогом' : 'Я не слежу за тлогом' });
     if (tlog.his_relationship !== undefined && tlog.his_relationship.length > 0)
         profileModel.append({label: tlog.his_relationship === 'friend' ? 'Следит за моим тлогом' : 'Не следит за моим тлогом'});
-    fillHeader(tlog);
-    lastSecondMode = window.secondMode;
+    if (window.secondMode !== 'profile')
+        lastSecondMode = window.secondMode;
     window.secondMode = 'profile';
+    fillHeader(tlog);
+    window.showNotifs = false;
+    window.showConvers = false;
     window.busy--;
 }
 
@@ -493,7 +555,7 @@ function readAllNotifications() {
 }
 
 function goToNotificationSource(notif) {
-    if (notif.entity_type === 'Comment') {
+    if (notif.entity_type === 'Entry' || notif.entity_type === 'Comment') {
         if (notif.parent_id !== undefined) {
             if (fullEntry.entryId !== notif.parent_id) {
                 fullEntry.entryId = notif.parent_id;
@@ -506,7 +568,7 @@ function goToNotificationSource(notif) {
             window.showNotifs = false;
         }
     }
-    else if (notif.entity_type === 'Entry' || notif.entity_type === 'Relationship') {
+    else if (notif.entity_type === 'Relationship') {
         authorId = notif.sender.id;
         changeMode('tlog');
     }
@@ -520,6 +582,20 @@ function reloadFeed() {
     loadNewEntries(true);
 }
 
+function showBayesUsers(usersList, adding, type) {
+    if (!adding) {
+        usersModel.clear();
+        if (window.secondMode != 'bayes')
+            lastSecondMode = window.secondMode;
+        window.secondMode = 'bayes';
+        users.type = type;
+        fillHeader();
+    }
+    for (var i in usersList) {
+        usersModel.append(usersList[i]);
+    }
+}
+
 function showUsers(relations, before) {
     if (!before) {
         usersModel.clear();
@@ -527,6 +603,7 @@ function showUsers(relations, before) {
         window.secondMode = 'users';
     }
     for (var i in relations) {
+        relations[i]['bayes_include'] = false;
         usersModel.append(relations[i]);
     }
     window.busy--;

@@ -60,7 +60,7 @@ function apiRequest(onSuccess, url, method, data) {
                     console.log('url: ' + url);
                     console.log('method: ' + method);
                     console.log('data: ' + data);
-                    console.debug("Status: " + request.status + ", Status Text: " + request.statusText);
+                    console.log("Status: " + request.status + ", Status Text: " + request.statusText);
                     if (onError !== undefined)
                         onError(request.status + '\n' + request.statusText);
                 }
@@ -89,7 +89,6 @@ function authorize(email, password) {
 function getMe(onSuccess) {
     var url = 'users/me.json';
     apiRequest(function (user) {
-                   console.log(user.title);
                    onSuccess(user);
                }, url);
 }
@@ -143,6 +142,11 @@ function getTlog(onSuccess, slug, before) {
 function getFavorites(onSuccess, before) {
     var url = 'my_feeds/favorites.json?';
     getFeed('favorites', onSuccess, url, before);
+}
+
+function getCalendar(onSuccess, slug) {
+    var url = 'tlog/' + slug + '/calendar.json';
+    apiRequest(onSuccess, url);
 }
 
 var latest_entry;
@@ -408,6 +412,16 @@ function getFollowings(onSuccess, slug, before) {
 function getFollowers(onSuccess, slug, before) {
     var url = 'tlog/' + slug + '/followers.json?limit=50';
     getUsers('followers', url, 'reader', onSuccess, slug, before);
+}
+
+function getMyFollowings(onSuccess, before) {
+    var url = 'relationships/to/friend.json?limit=50';
+    getUsers('followings', url, 'user', onSuccess, '_my_followings', before);
+}
+
+function getMyIgnored(onSuccess, before) {
+    var url = 'relationships/to/ignored.json?limit=50';
+    getUsers('ignored', url, 'user', onSuccess, '_my_ignored', before);
 }
 
 function getTlogInfo(onSuccess, slug) {

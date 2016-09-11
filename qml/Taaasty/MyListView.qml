@@ -11,11 +11,13 @@ ListView {
     signal aboveBegin
     signal nearEnd
     property int endHeight: 2
-    onContentYChanged: {
+    function checkEnd(){
         if (contentHeight - contentY < window.height * endHeight || atYEnd) {
             list.nearEnd();
         }
     }
+    onContentYChanged: checkEnd()
+    onContentHeightChanged: checkEnd()
     onFlickStarted: {
         if (contentY < 0) {
             list.aboveBegin();

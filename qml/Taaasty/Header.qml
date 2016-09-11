@@ -109,16 +109,12 @@ MouseArea {
             source: avatarUrl
             symbol: avatarUrl.length === 0
             name: header.nick
-            MouseArea {
-                anchors.fill: parent
-                onClicked: {
-                    if (window.showSlugInput)
-                        window.showSlugInput = false;
-                    else
-                        showProfileMenu = !showProfileMenu;
-                }
+            onClicked: {
+                if (window.showSlugInput)
+                    window.showSlugInput = false;
+                else
+                    showProfileMenu = !showProfileMenu;
             }
-
         }
         Text {
             id: nick

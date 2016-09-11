@@ -45,7 +45,8 @@ OTHER_FILES += \
     qtc_packaging/debian_fremantle/control \
     qtc_packaging/debian_fremantle/compat \
     qtc_packaging/debian_fremantle/changelog \
-    qml/Taaasty/TastyAPI.js
+    qml/Taaasty/*.js \
+    qml/Taaasty/ProgressBar.qml
 
 QT += network
 
